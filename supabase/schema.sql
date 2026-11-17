@@ -287,42 +287,48 @@ CREATE POLICY "rate_history insert admin only" ON public.rate_history
   FOR INSERT WITH CHECK (public.is_admin(auth.uid()));
 
 -- ---------------------------------------------------------------------
--- Storage: private buckets + policies.
+-- Storage: private buckets. (Policies are created in the Dashboard, NOT
+-- here — see below.)
 -- Files are stored as <user_id>/<timestamp>-<filename>. Users may
 -- upload/read only inside their own folder; admins may read all.
 -- Proofs are uploaded by the admin into the ORDER OWNER's folder (see
 -- app.js) so the customer can view them; admins may upload into any
 -- folder. Reads go through signed URLs (see store.getFileUrl).
 -- If the INSERTs below fail in your project, create the buckets by hand
--- in Dashboard > Storage (private, NOT public) and re-run the policies.
+-- in Dashboard > Storage (private, NOT public).
 -- ---------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('slips', 'slips', false), ('proofs', 'proofs', false)
 ON CONFLICT (id) DO NOTHING;
 
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "slips proofs select own or admin" ON storage.objects;
-CREATE POLICY "slips proofs select own or admin" ON storage.objects
-  FOR SELECT USING (
-    bucket_id IN ('slips', 'proofs')
-    AND (
-      (storage.foldername(name))[1] = auth.uid()::text
-      OR public.is_admin(auth.uid())
-    )
-  );
-
-DROP POLICY IF EXISTS "slips proofs insert own folder" ON storage.objects;
-DROP POLICY IF EXISTS "slips proofs insert own folder or admin" ON storage.objects;
-CREATE POLICY "slips proofs insert own folder or admin" ON storage.objects
-  FOR INSERT WITH CHECK (
-    bucket_id IN ('slips', 'proofs')
-    AND (
-      (storage.foldername(name))[1] = auth.uid()::text
-      OR public.is_admin(auth.uid())
-    )
-  );
--- No UPDATE/DELETE policies on storage.objects: files are immutable.
+-- ---------------------------------------------------------------------
+-- Storage RLS policies — CREATE THESE IN THE DASHBOARD UI, NOT IN SQL.
+-- Why: on this project the SQL Editor role is not the owner of
+-- storage.objects, so ALTER TABLE / CREATE POLICY on it fails with
+-- ERROR 42501 ("must be owner of table objects") and rolls the whole
+-- script back. RLS is already enabled on storage.objects by Supabase.
+-- Do NOT re-add ALTER/CREATE POLICY statements for storage.objects here.
+--
+-- Dashboard > Storage > Policies: create these 2 policies (each covers
+-- BOTH buckets via the bucket_id check; create once, from either
+-- bucket's policy page, using full-custom expressions — if the UI
+-- forces a per-bucket scope, create the same pair for each bucket with
+-- bucket_id = 'slips' / bucket_id = 'proofs' respectively):
+--
+-- 1) Name: slips proofs select own or admin | Operation: SELECT
+--    USING expression:
+--    bucket_id IN ('slips', 'proofs')
+--    AND ((storage.foldername(name))[1] = auth.uid()::text
+--         OR public.is_admin(auth.uid()))
+-- 2) Name: slips proofs insert own folder or admin | Operation: INSERT
+--    WITH CHECK expression:
+--    bucket_id IN ('slips', 'proofs')
+--    AND ((storage.foldername(name))[1] = auth.uid()::text
+--         OR public.is_admin(auth.uid()))
+-- No UPDATE/DELETE policies: files are immutable.
+-- Without these 2 policies, RLS denies ALL file access (even owners),
+-- so slip/proof viewing breaks. Verify in Storage > Policies after setup.
+-- ---------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------
 -- Realtime: publish order changes so the admin panel updates live.
