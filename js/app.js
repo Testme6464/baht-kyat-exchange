@@ -245,6 +245,8 @@ var STRINGS = {
   editMethod: 'ပြင်မည်',
   deleteMethod: 'ဖျက်မည်',
   noMethods: 'အကောင့် မသတ်မှတ်ရသေးပါ။',
+  receiveMethodsTitle: 'လက်ခံနည်း အဖွင့်/အပိတ်',
+  receiveMethodsHint: 'ဖွင့်ထားတဲ့ နည်းတွေသာ user တွေ order တင်တဲ့အခါ ပေါ်မယ်။ limit ပြည့်တဲ့ နည်းကို ခေတ္တပိတ်ထားနိုင်တယ်။',
   adminsTitle: 'အက်ဒမင်များ',
   addAdminByEmail: 'အီးမေးလ်ဖြင့် အက်ဒမင် ထည့်ရန်',
   addAdminBtn: 'အက်ဒမင် ထည့်မည်',
@@ -451,13 +453,22 @@ var DEFAULT_SETTINGS = {
   fees: { fee_percent: 0, min_thb: 100, max_thb: 50000, min_mmk: 10000, max_mmk: 5000000 },
   payments_thb: { methods: [] },
   payments_mmk: { methods: [] },
+  receive_methods: { methods: [
+    { label: 'KBZPay', enabled: true },
+    { label: 'WavePay', enabled: true },
+    { label: 'AYA Pay', enabled: true },
+    { label: 'CB Pay', enabled: true },
+    { label: 'KBZ Bank', enabled: true },
+    { label: 'PromptPay', enabled: true },
+    { label: 'Other', enabled: true }
+  ] },
   shop: { name: '', announcement: '', is_open: true, open_hours: '', contact_telegram: '', contact_phone: '' }
 };
 
 function mergeSettings(stored) {
   var out = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   if (!stored) return out;
-  ['rates', 'fees', 'payments_thb', 'payments_mmk', 'shop'].forEach(function (key) {
+  ['rates', 'fees', 'payments_thb', 'payments_mmk', 'receive_methods', 'shop'].forEach(function (key) {
     if (stored[key] && typeof stored[key] === 'object') {
       Object.keys(stored[key]).forEach(function (k) { out[key][k] = stored[key][k]; });
     }
@@ -523,6 +534,23 @@ function validateAmount(direction, sendAmount, settings) {
 
 var RECEIVE_METHODS = ['KBZPay', 'WavePay', 'AYA Pay', 'CB Pay', 'KBZ Bank', 'PromptPay'];
 
+// Receive methods the admin left enabled (Admin > Settings). The list lives
+// in the `receive_methods` settings key so the admin can switch a method off
+// when its payment limit is reached; users then cannot pick it for new orders.
+function enabledReceiveMethods() {
+  var list = state.settings && state.settings.receive_methods && state.settings.receive_methods.methods;
+  if (!Array.isArray(list) || !list.length) list = DEFAULT_SETTINGS.receive_methods.methods;
+  var enabled = list.filter(function (m) { return m && m.label && m.enabled !== false; }).map(function (m) { return m.label; });
+  // Never strand the user: if the admin disabled everything, fall back to the full list.
+  if (!enabled.length) enabled = list.filter(function (m) { return m && m.label; }).map(function (m) { return m.label; });
+  if (!enabled.length) enabled = RECEIVE_METHODS.concat(['Other']);
+  return enabled;
+}
+
+function receiveMethodLabel(value) {
+  return value === 'Other' ? S('methodOther') : value;
+}
+
 /* ---------------- shell (header / nav / demo banner) ---------------- */
 
 function renderShell() {
@@ -551,6 +579,11 @@ function renderShell() {
 
   var nav = $('#bottomNav');
   var hash = window.location.hash || '#/';
+  // Admin pages have their own tab bar; the user bottom nav (dashboard,
+  // new order, ...) does not belong there, so hide it on #/admin.
+  var isAdminPage = hash.indexOf('#/admin') === 0;
+  nav.style.display = isAdminPage ? 'none' : '';
+  document.body.classList.toggle('no-bottom-nav', isAdminPage);
   function activeFor(prefix) { return hash.indexOf(prefix) === 0 ? 'active' : ''; }
   var homeActive = (hash === '#/' || hash === '#' || hash === '') ? 'active' : '';
   var items = '';
@@ -1148,9 +1181,9 @@ async function renderProfile(token) {
       '<button class="btn btn--outline btn--small" data-remove-receiver="' + i + '" type="button">' + esc(S('removeReceiver')) + '</button></div>' +
       '<div class="small">' + esc(r.name || '') + ' · ' + esc(r.account || '') + (r.phone ? ' · ' + esc(r.phone) : '') + '</div></div>';
   }).join('') : '<p class="empty">' + esc(S('noReceivers')) + '</p>';
-  var methodOptions = RECEIVE_METHODS.map(function (m) {
-    return '<option value="' + esc(m) + '">' + esc(m) + '</option>';
-  }).join('') + '<option value="Other">' + esc(S('methodOther')) + '</option>';
+  var methodOptions = enabledReceiveMethods().map(function (m) {
+    return '<option value="' + esc(m) + '">' + esc(receiveMethodLabel(m)) + '</option>';
+  }).join('');
 
   setView(
     '<div class="card"><h2>' + esc(S('profileTitle')) + '</h2>' +
@@ -1375,10 +1408,12 @@ function renderWizardStep3(token) {
           '<button class="btn btn--outline btn--small" data-use-saved="' + i + '" type="button">' + esc(S('useSaved')) + '</button></div></div>';
       }).join('') + '</div>';
   }
-  var methodOptions = RECEIVE_METHODS.map(function (m) {
+  var enabledMethods = enabledReceiveMethods();
+  if (enabledMethods.indexOf(wizard.receiveMethod) === -1) wizard.receiveMethod = enabledMethods[0];
+  var methodOptions = enabledMethods.map(function (m) {
     var sel = wizard.receiveMethod === m ? ' selected' : '';
-    return '<option value="' + esc(m) + '"' + sel + '>' + esc(m) + '</option>';
-  }).join('') + '<option value="Other"' + (wizard.receiveMethod === 'Other' ? ' selected' : '') + '>' + esc(S('methodOther')) + '</option>';
+    return '<option value="' + esc(m) + '"' + sel + '>' + esc(receiveMethodLabel(m)) + '</option>';
+  }).join('');
   var preview = wizard.slipPreviewUrl
     ? '<img class="slip-img" src="' + esc(wizard.slipPreviewUrl) + '" alt="" style="margin-top:8px">'
     : '';
@@ -1854,6 +1889,17 @@ async function renderAdminSettings(token, content) {
       '<button class="btn btn--block" type="submit">' + esc(editing ? S('save') : S('addMethod')) + '</button></form></div>';
   }
 
+  function receiveMethodsEditor() {
+    var list = (st.receive_methods && st.receive_methods.methods) || DEFAULT_SETTINGS.receive_methods.methods;
+    var rows = list.map(function (m, i) {
+      return '<label class="check-row"><input type="checkbox" data-recv-method="' + i + '"' + (m.enabled !== false ? ' checked' : '') + '> ' + esc(receiveMethodLabel(m.label || '')) + '</label>';
+    }).join('');
+    return '<div class="card"><h2>' + esc(S('receiveMethodsTitle')) + '</h2>' +
+      '<p class="small muted">' + esc(S('receiveMethodsHint')) + '</p>' +
+      '<form id="recvMethodsForm">' + rows +
+      '<button class="btn btn--block" type="submit">' + esc(S('saveSettings')) + '</button></form></div>';
+  }
+
   var adminRows = admins.map(function (a) {
     var isSelf = a.user_id === state.user.id;
     return '<div class="pay-method"><div class="row-between"><span><strong>' + esc(a.display_name || '') + '</strong><br>' +
@@ -1879,6 +1925,7 @@ async function renderAdminSettings(token, content) {
     '<button class="btn btn--block" type="submit">' + esc(S('saveSettings')) + '</button></form></div>' +
     methodsEditor('payments_thb', 'paymentsThbTitle') +
     methodsEditor('payments_mmk', 'paymentsMmkTitle') +
+    receiveMethodsEditor() +
     '<div class="card"><h2>' + esc(S('adminsTitle')) + '</h2>' + adminRows +
     '<form id="addAdminForm">' +
     '<div class="field"><label for="addAdminEmail">' + esc(S('addAdminByEmail')) + '</label>' +
@@ -1899,6 +1946,22 @@ async function renderAdminSettings(token, content) {
       });
       await loadSettings();
       renderShell();
+      showToast(S('settingsSaved'));
+    } catch (err) { showToast(S('errorGeneric'), true); }
+  });
+
+  var recvMethodsForm = $('#recvMethodsForm', content);
+  if (recvMethodsForm) recvMethodsForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var current = (state.settings.receive_methods && state.settings.receive_methods.methods) || DEFAULT_SETTINGS.receive_methods.methods;
+    var list = current.map(function (m) { return { label: m.label, enabled: m.enabled !== false }; });
+    $all('[data-recv-method]', recvMethodsForm).forEach(function (cb) {
+      var i = Number(cb.getAttribute('data-recv-method'));
+      if (list[i]) list[i].enabled = cb.checked;
+    });
+    try {
+      await store.updateSettings('receive_methods', { methods: list });
+      await loadSettings();
       showToast(S('settingsSaved'));
     } catch (err) { showToast(S('errorGeneric'), true); }
   });
