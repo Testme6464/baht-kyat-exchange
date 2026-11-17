@@ -17,15 +17,21 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ---------------------------------------------------------------------
 -- Helper: is the given user an admin? SECURITY DEFINER so RLS policies
 -- can call it without recursing into the `admins` table policies.
+-- LANGUAGE plpgsql (NOT sql) on purpose: a SQL-language body is validated
+-- at CREATE time, so it would fail with 'relation "public.admins" does
+-- not exist' because this function is defined before the admins table.
+-- plpgsql defers validation to first execution, when the table exists.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.is_admin(uid uuid)
 RETURNS boolean
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 STABLE
 SET search_path = public
 AS $$
-  SELECT EXISTS (SELECT 1 FROM public.admins WHERE user_id = uid);
+BEGIN
+  RETURN EXISTS (SELECT 1 FROM public.admins WHERE user_id = uid);
+END;
 $$;
 
 -- ---------------------------------------------------------------------
