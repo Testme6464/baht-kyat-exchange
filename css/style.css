@@ -29,6 +29,7 @@ body {
   line-height: 1.65;
   padding-bottom: 76px; /* room for bottom nav */
 }
+body.no-bottom-nav { padding-bottom: 0; /* admin pages hide the user bottom nav */ }
 a { color: var(--blue); }
 img { max-width: 100%; }
 button, input, select, textarea { font: inherit; }
