@@ -14,6 +14,6 @@
  * service_role key here.
  * ===================================================================== */
 window.EXCHANGE_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: ''
+  SUPABASE_URL: 'https://mottxqcfmsgbcuzcdpve.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vdHR4cWNmbXNnYmN1emNkcHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ4NTk1NDgsImV4cCI6MjExMDQzNTU0OH0.vY1bncSmLFbZ2W_O3zUzn4yGmHMvu4rLlBSGkIa7lP8'
 };
