@@ -1,0 +1,16 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Dependencies / build output (none required — static site)
+node_modules/
+dist/
+
+# Local env / scratch (never commit real credentials)
+.env
+.env.*
+*.log
