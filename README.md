@@ -59,11 +59,19 @@ with real money or real customer data — it is for trying the UI only.
 2. Paste the full contents of `supabase/schema.sql` and press **Run**.
 3. The script is idempotent (safe to re-run). It creates the tables,
    enables RLS on every table, seeds default settings, and creates the
-   private `slips` and `proofs` storage buckets with access policies.
+   private `slips` and `proofs` storage buckets.
 
 If the bucket-creation lines fail in your project, create the buckets by
 hand in Dashboard → **Storage** (names `slips` and `proofs`, **private**,
-not public) and re-run the storage-policy section of the script.
+not public).
+
+### 2b. Create the storage access policies in the Dashboard UI
+
+The SQL Editor role cannot create policies on `storage.objects` (error
+42501), so the two policies live outside the script: create them in
+Dashboard → **Storage** → **Policies** using the exact expressions in the
+comment block at the end of `supabase/schema.sql`. Without them, RLS
+denies all file access and slip/proof viewing breaks.
 
 ### 3. Turn OFF email confirmation
 
