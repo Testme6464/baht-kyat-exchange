@@ -803,7 +803,7 @@ function renderLogin(token) {
   var demoBtns = '';
   if (store.isDemoMode) {
     demoBtns = '<hr class="divider">' +
-      '<button class="btn btn--amber btn--block" id="demoAdminBtn" type="button">' + esc(S('demoLoginBtn')) + '</button>' +
+      '<button class="btn btn--cta btn--block" id="demoAdminBtn" type="button">' + esc(S('demoLoginBtn')) + '</button>' +
       '<p class="tiny muted center">' + esc(S('demoLoginHint')) + '</p>' +
       '<button class="btn btn--outline btn--block" id="demoUserBtn" type="button">' + esc(S('demoUserBtn')) + '</button>' +
       '<p class="tiny muted center">' + esc(S('demoUserHint')) + '</p>';
@@ -975,8 +975,8 @@ async function renderHome(token) {
     (shop.open_hours ? ' · ' + esc(S('openHours')) + ': ' + esc(shop.open_hours) : '') + '</div>';
 
   var cta = state.user
-    ? '<a class="btn btn--amber btn--block" href="#/order/new">' + esc(S('orderNow')) + '</a>'
-    : '<a class="btn btn--amber btn--block" href="#/login">' + esc(S('loginToOrder')) + '</a>';
+    ? '<a class="btn btn--cta btn--block" href="#/order/new">' + esc(S('orderNow')) + '</a>'
+    : '<a class="btn btn--cta btn--block" href="#/login">' + esc(S('loginToOrder')) + '</a>';
 
   setView(
     '<div class="card rate-hero"><div class="row-between"><h2>' + esc(S('rateTitle')) + '</h2>' + statusPill + '</div>' +
@@ -1110,7 +1110,7 @@ async function renderDashboard(token) {
     '<div id="scResult"></div>' +
     '<p class="field-error" id="scError" role="alert"></p>' +
     (st.shop.is_open
-      ? '<button class="btn btn--amber btn--block" id="scOrder" type="button" disabled>' + esc(S('orderWithAmount')) + '</button>'
+      ? '<button class="btn btn--cta btn--block" id="scOrder" type="button" disabled>' + esc(S('orderWithAmount')) + '</button>'
       : '<div class="shop-closed">' + esc(S('shopClosedBlock')) + '</div>') +
     '</div>';
   setView(
@@ -1121,7 +1121,7 @@ async function renderDashboard(token) {
     '<div class="stat"><div class="stat-num">' + esc(String(completed)) + '</div><div class="stat-label">' + esc(S('statCompleted')) + '</div></div>' +
     '<div class="stat"><div class="stat-num">' + esc(String(orders.length)) + '</div><div class="stat-label">' + esc(S('statTotalOrders')) + '</div></div>' +
     '</div>' +
-    '<p style="margin:14px 0"><a class="btn btn--amber btn--block" href="#/order/new">' + esc(S('orderNow')) + '</a></p>' +
+    '<p style="margin:14px 0"><a class="btn btn--cta btn--block" href="#/order/new">' + esc(S('orderNow')) + '</a></p>' +
     calcCard +
     '<div class="card"><div class="row-between"><h2 class="mb0">' + esc(S('recentOrders')) + '</h2>' +
     '<a href="#/orders">' + esc(S('viewAll')) + '</a></div>' +
