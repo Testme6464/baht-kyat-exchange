@@ -165,6 +165,7 @@ var STRINGS = {
   confirmTitle: 'အတည်ပြုပါ',
   confirmText: 'အော်ဒါတင်ပြီးရင် ဈေးနှုန်းက အတည်ဖြစ်သည်။ ငွေလွှဲပြီးကြောင်း သေချာမှ တင်ပါ။',
   orderCreated: 'အော်ဒါ တင်ပြီးပါပြီ။',
+  orderWithAmount: 'ဒီပမာဏနဲ့ အော်ဒါတင်မည်',
   shopClosedBlock: 'ဆိုင်ပိတ်ထားချိန် အော်ဒါတင်လို့မရပါ။ ဆိုင်ဖွင့်ချိန်ကျမှ ပြန်တင်ပေးပါ။',
 
   profileTitle: 'ပရိုဖိုင်',
@@ -499,23 +500,90 @@ function statusLabel(status) {
 /* Quote math (also documented in README.md):
  * THB_TO_MMK: gross = send * thb_to_mmk (MMK), fee on gross, net = gross - fee.
  * MMK_TO_THB: gross = send / mmk_to_thb (THB), fee on gross, net = gross - fee.
- * Fee is always in the RECEIVE currency. MMK rounds to whole kyat, THB to 2dp. */
-function calcQuote(direction, sendAmount, settings) {
+ * Fee is always in the RECEIVE currency. MMK rounds to whole kyat, THB to 2dp.
+ * rateOverride (smart calculator): a custom rate typed by the user replaces
+ * the shop rate; the fee percent still applies. Orders always requote at
+ * the live shop rate. */
+function calcQuote(direction, sendAmount, settings, rateOverride) {
   var st = settings || state.settings;
   var send = Number(sendAmount);
   if (!isFinite(send) || send <= 0) return null;
   var feePct = Number(st.fees.fee_percent) || 0;
+  var override = Number(rateOverride);
+  var useOverride = isFinite(override) && override > 0;
   if (direction === 'THB_TO_MMK') {
-    var rate = Number(st.rates.thb_to_mmk);
+    var rate = useOverride ? override : Number(st.rates.thb_to_mmk);
     var gross = send * rate;
     var fee = Math.round(gross * feePct / 100);
     return { rate: rate, gross: Math.round(gross), fee: fee, net: Math.round(gross) - fee, sendCurrency: 'THB', receiveCurrency: 'MMK' };
   }
-  var rate2 = Number(st.rates.mmk_to_thb);
+  var rate2 = useOverride ? override : Number(st.rates.mmk_to_thb);
   var gross2 = send / rate2;
   var fee2 = Math.round(gross2 * feePct / 100 * 100) / 100;
   var net2 = Math.round((gross2 - fee2) * 100) / 100;
   return { rate: rate2, gross: Math.round(gross2 * 100) / 100, fee: fee2, net: net2, sendCurrency: 'MMK', receiveCurrency: 'THB' };
+}
+
+/* Reverse quote for the smart calculator: given the NET amount the user
+ * wants to receive, find the smallest send amount (in the send currency's
+ * smallest unit) whose forward quote nets at least that much. Uses the
+ * same rate override as calcQuote, so a custom rate round-trips exactly.
+ * Returns { send, quote } or null. */
+function calcReverseQuote(direction, netAmount, settings, rateOverride) {
+  var st = settings || state.settings;
+  var target = Number(netAmount);
+  if (!isFinite(target) || target <= 0) return null;
+  var feePct = Number(st.fees.fee_percent) || 0;
+  if (feePct >= 100) return null;
+  var override = Number(rateOverride);
+  var rate = (isFinite(override) && override > 0) ? override :
+    (direction === 'THB_TO_MMK' ? Number(st.rates.thb_to_mmk) : Number(st.rates.mmk_to_thb));
+  if (!(rate > 0)) return null;
+  var grossNeeded = target / (1 - feePct / 100);
+  var send;
+  var q;
+  var i;
+  if (direction === 'THB_TO_MMK') {
+    // Send currency THB: smallest unit 0.01; iterate in integer cents
+    // so float drift never skips a cent. Walk up to the first send that
+    // reaches the target, then back down while the previous cent still
+    // reaches it — gross rounding can make a smaller send sufficient.
+    var cents = Math.ceil(grossNeeded / rate * 100);
+    for (i = 0; i < 10000; i++) {
+      send = cents / 100;
+      q = calcQuote(direction, send, st, rate);
+      if (q && q.net >= target) break;
+      cents++;
+    }
+    if (!q || q.net < target) return null;
+    while (cents > 1) {
+      var prev = calcQuote(direction, (cents - 1) / 100, st, rate);
+      if (prev && prev.net >= target) { cents--; q = prev; } else break;
+    }
+    return { send: cents / 100, quote: q };
+  }
+  // Send currency MMK: whole kyat; same up-then-down walk.
+  send = Math.ceil(grossNeeded * rate);
+  for (i = 0; i < 10000; i++) {
+    q = calcQuote(direction, send, st, rate);
+    if (q && q.net >= target) break;
+    send += 1;
+  }
+  if (!q || q.net < target) return null;
+  while (send > 1) {
+    var prev2 = calcQuote(direction, send - 1, st, rate);
+    if (prev2 && prev2.net >= target) { send -= 1; q = prev2; } else break;
+  }
+  return { send: send, quote: q };
+}
+
+/* Plain (no thousands separators) amount text for prefilling inputs:
+ * THB to 2dp trimmed, MMK whole. parseFloat-safe. */
+function fmtPlainAmount(value, currency) {
+  var v = Number(value);
+  if (!isFinite(v)) return '';
+  if (currency === 'THB') return String(parseFloat(v.toFixed(2)));
+  return String(Math.round(v));
 }
 
 function amountLimits(direction, settings) {
@@ -534,6 +602,12 @@ function validateAmount(direction, sendAmount, settings) {
 }
 
 var RECEIVE_METHODS = ['KBZPay', 'WavePay', 'AYA Pay', 'CB Pay', 'KBZ Bank', 'PromptPay'];
+
+// Quick send amounts offered by the smart calculator, per direction.
+var QUICK_SEND = {
+  THB_TO_MMK: [100, 500, 1000, 5000, 10000],
+  MMK_TO_THB: [50000, 100000, 500000, 1000000, 2000000]
+};
 
 // Receive methods the admin left enabled (Admin > Settings). The list lives
 // in the `receive_methods` settings key so the admin can switch a method off
@@ -1002,6 +1076,8 @@ function timelineHtml(order) {
 
 async function renderDashboard(token) {
   setView(spinnerHtml());
+  await loadSettings();
+  var st = state.settings;
   var orders = [];
   try {
     orders = await store.listOrders({ userId: state.user.id, isAdmin: false });
@@ -1015,6 +1091,28 @@ async function renderDashboard(token) {
   var completed = orders.filter(function (o) { return o.status === 'completed'; }).length;
   var name = state.profile && state.profile.display_name ? state.profile.display_name : '';
   var recent = orders.slice(0, 5);
+  // Smart calculator: the user types any rate they like, then calculates
+  // either way (send -> receive, or receive -> send). The custom rate is
+  // for calculating only; orders always requote at the live shop rate.
+  var calcCard =
+    '<div class="card"><h2>' + esc(S('calcTitle')) + '</h2>' +
+    '<div class="filter-bar" role="group" aria-label="' + esc(S('directionLabel')) + '">' +
+    '<button class="chip active" id="scDirThb" type="button">' + esc(S('directionThbToMmk')) + '</button>' +
+    '<button class="chip" id="scDirMmk" type="button">' + esc(S('directionMmkToThb')) + '</button></div>' +
+    '<div class="field"><label for="scRate">' + esc(S('rate')) + '</label>' +
+    '<input class="input input--amount" id="scRate" type="number" inputmode="decimal" min="0" step="any" value="' + esc(fmtPlainAmount(Number(st.rates.thb_to_mmk), 'THB')) + '">' +
+    '<p class="hint" id="scLiveHint">' + esc(S('rateTitle')) + ': ' + esc(fmtNum(Number(st.rates.thb_to_mmk), 2)) + '</p></div>' +
+    '<div class="field"><label for="scSend">' + esc(S('youSend')) + '</label>' +
+    '<input class="input input--amount" id="scSend" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>' +
+    '<div class="field"><label for="scReceive">' + esc(S('youReceive')) + '</label>' +
+    '<input class="input input--amount" id="scReceive" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>' +
+    '<div class="filter-bar" id="scChips"></div>' +
+    '<div id="scResult"></div>' +
+    '<p class="field-error" id="scError" role="alert"></p>' +
+    (st.shop.is_open
+      ? '<button class="btn btn--amber btn--block" id="scOrder" type="button" disabled>' + esc(S('orderWithAmount')) + '</button>'
+      : '<div class="shop-closed">' + esc(S('shopClosedBlock')) + '</div>') +
+    '</div>';
   setView(
     '<h2 class="mt0">' + esc(S('dashboardTitle')) + '</h2>' +
     (name ? '<p class="muted">' + esc(S('hello')) + ' ' + esc(name) + '</p>' : '') +
@@ -1024,12 +1122,105 @@ async function renderDashboard(token) {
     '<div class="stat"><div class="stat-num">' + esc(String(orders.length)) + '</div><div class="stat-label">' + esc(S('statTotalOrders')) + '</div></div>' +
     '</div>' +
     '<p style="margin:14px 0"><a class="btn btn--amber btn--block" href="#/order/new">' + esc(S('orderNow')) + '</a></p>' +
+    calcCard +
     '<div class="card"><div class="row-between"><h2 class="mb0">' + esc(S('recentOrders')) + '</h2>' +
     '<a href="#/orders">' + esc(S('viewAll')) + '</a></div>' +
     '<div style="margin-top:10px">' +
     (recent.length ? recent.map(orderItemHtml).join('') : '<p class="empty">' + esc(S('noOrders')) + '</p>') +
     '</div></div>'
   );
+
+  // ---- smart calculator wiring ----
+  var direction = 'THB_TO_MMK';
+  var lastEdited = null; // 'send' | 'receive'
+  var pendingSend = null;
+  function liveRate() {
+    return direction === 'THB_TO_MMK' ? Number(st.rates.thb_to_mmk) : Number(st.rates.mmk_to_thb);
+  }
+  function sendCurrency() { return direction === 'THB_TO_MMK' ? 'THB' : 'MMK'; }
+  function receiveCurrency() { return direction === 'THB_TO_MMK' ? 'MMK' : 'THB'; }
+  function customRate() {
+    var r = Number($('#scRate').value);
+    return (isFinite(r) && r > 0) ? r : NaN;
+  }
+  function showQuote(quote) {
+    $('#scResult').innerHTML = '<div class="calc-result">' +
+      '<div class="kv"><span class="k">' + esc(S('rateUsed')) + '</span><span class="v">' + esc(fmtNum(quote.rate, 2)) + '</span></div>' +
+      '<div class="kv"><span class="k">' + esc(S('youReceive')) + '</span><span class="v">' + esc(fmtMoney(quote.gross, quote.receiveCurrency)) + '</span></div>' +
+      '<div class="kv"><span class="k">' + esc(S('fee')) + ' (' + esc(fmtNum(st.fees.fee_percent, 2)) + '%)</span><span class="v">' + esc(fmtMoney(quote.fee, quote.receiveCurrency)) + '</span></div>' +
+      '<div class="kv"><span class="k">' + esc(S('netReceive')) + '</span><span class="big">' + esc(fmtMoney(quote.net, quote.receiveCurrency)) + '</span></div></div>';
+  }
+  function updateOrderBtn(send) {
+    pendingSend = send;
+    var btn = $('#scOrder');
+    if (btn) btn.disabled = (send === null);
+  }
+  function recompute() {
+    var rate = customRate();
+    var box = $('#scResult');
+    $('#scError').textContent = '';
+    if (!isFinite(rate)) { box.innerHTML = ''; updateOrderBtn(null); return; }
+    if (lastEdited === 'send') {
+      var send = Number($('#scSend').value);
+      var quote = calcQuote(direction, send, st, rate);
+      if (!quote) { box.innerHTML = ''; $('#scReceive').value = ''; updateOrderBtn(null); return; }
+      $('#scReceive').value = fmtPlainAmount(quote.net, receiveCurrency());
+      var err = validateAmount(direction, send, st);
+      showQuote(quote);
+      $('#scError').textContent = err;
+      updateOrderBtn(err ? null : send);
+    } else if (lastEdited === 'receive') {
+      var net = Number($('#scReceive').value);
+      var rev = calcReverseQuote(direction, net, st, rate);
+      if (!rev) { box.innerHTML = ''; $('#scSend').value = ''; updateOrderBtn(null); return; }
+      $('#scSend').value = fmtPlainAmount(rev.send, sendCurrency());
+      var err2 = validateAmount(direction, rev.send, st);
+      showQuote(rev.quote);
+      $('#scError').textContent = err2;
+      updateOrderBtn(err2 ? null : rev.send);
+    } else {
+      box.innerHTML = '';
+      updateOrderBtn(null);
+    }
+  }
+  function renderChips() {
+    var amounts = QUICK_SEND[direction];
+    $('#scChips').innerHTML = amounts.map(function (a) {
+      return '<button class="chip" data-amount="' + esc(String(a)) + '" type="button">' + esc(fmtNum(a)) + '</button>';
+    }).join('');
+    $all('#scChips [data-amount]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $('#scSend').value = btn.getAttribute('data-amount');
+        lastEdited = 'send';
+        recompute();
+      });
+    });
+  }
+  function setDirection(dir) {
+    direction = dir;
+    $('#scDirThb').classList.toggle('active', dir === 'THB_TO_MMK');
+    $('#scDirMmk').classList.toggle('active', dir === 'MMK_TO_THB');
+    // A fresh direction starts from its live shop rate; the user can
+    // then type any rate they like.
+    $('#scRate').value = fmtPlainAmount(liveRate(), 'THB');
+    $('#scLiveHint').textContent = S('rateTitle') + ': ' + fmtNum(liveRate(), 2);
+    renderChips();
+    recompute();
+  }
+  $('#scDirThb').addEventListener('click', function () { setDirection('THB_TO_MMK'); });
+  $('#scDirMmk').addEventListener('click', function () { setDirection('MMK_TO_THB'); });
+  $('#scRate').addEventListener('input', recompute);
+  $('#scSend').addEventListener('input', function () { lastEdited = 'send'; recompute(); });
+  $('#scReceive').addEventListener('input', function () { lastEdited = 'receive'; recompute(); });
+  renderChips();
+  var orderBtn = $('#scOrder');
+  if (orderBtn) {
+    orderBtn.addEventListener('click', function () {
+      if (pendingSend === null) return;
+      orderPrefill = { direction: direction, sendAmount: fmtPlainAmount(pendingSend, sendCurrency()) };
+      window.location.hash = '#/order/new';
+    });
+  }
 }
 
 /* ---------------- orders list ---------------- */
@@ -1293,6 +1484,9 @@ async function renderProfile(token) {
 /* ---------------- new order wizard ---------------- */
 
 var wizard = null;
+// One-shot prefill set by the dashboard smart calculator's order button;
+// consumed by renderNewOrder, then cleared.
+var orderPrefill = null;
 function freshWizard() {
   return {
     step: 1,
@@ -1326,6 +1520,14 @@ async function renderNewOrder(token) {
       wizard.receiverName = state.profile.display_name;
       wizard.receiverPhone = state.profile.phone || '';
     }
+  }
+  // Prefill from the dashboard smart calculator ("order with this amount").
+  // Only the direction + send amount carry over; the wizard requotes at
+  // the live shop rate, never at a custom calculator rate.
+  if (orderPrefill) {
+    wizard.direction = orderPrefill.direction;
+    wizard.sendAmount = orderPrefill.sendAmount;
+    orderPrefill = null;
   }
   renderWizard(token);
 }
