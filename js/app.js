@@ -165,7 +165,7 @@ var STRINGS = {
   confirmTitle: 'အတည်ပြုပါ',
   confirmText: 'အော်ဒါတင်ပြီးရင် ဈေးနှုန်းက အတည်ဖြစ်သည်။ ငွေလွှဲပြီးကြောင်း သေချာမှ တင်ပါ။',
   orderCreated: 'အော်ဒါ တင်ပြီးပါပြီ။',
-  shopClosedWarn: 'ဆိုင်ပိတ်ထားချိန် ဖြစ်သည် — အော်ဒါကို လက်ခံထားပြီး ဖွင့်ချိန်တွင် စစ်ဆေးပါမည်။',
+  shopClosedBlock: 'ဆိုင်ပိတ်ထားချိန် အော်ဒါတင်လို့မရပါ။ ဆိုင်ဖွင့်ချိန်ကျမှ ပြန်တင်ပေးပါ။',
 
   profileTitle: 'ပရိုဖိုင်',
   save: 'သိမ်းမည်',
@@ -1340,6 +1340,14 @@ function wizardStepsHtml() {
 }
 
 function renderWizard(token) {
+  // Shop closed: no order form at all, just the closed message.
+  if (!state.settings.shop.is_open) {
+    setView(
+      '<h2 class="mt0">' + esc(S('newOrderTitle')) + '</h2>' +
+      '<div class="shop-closed">' + esc(S('shopClosedBlock')) + '</div>' +
+      '<p><a class="btn btn--outline" href="#/">' + esc(S('backHome')) + '</a></p>');
+    return;
+  }
   if (wizard.step === 1) renderWizardStep1(token);
   else if (wizard.step === 2) renderWizardStep2(token);
   else renderWizardStep3(token);
@@ -1347,10 +1355,8 @@ function renderWizard(token) {
 
 function renderWizardStep1(token) {
   var st = state.settings;
-  var closedWarn = st.shop.is_open ? '' :
-    '<div class="shop-closed">' + esc(S('shopClosedWarn')) + '</div>';
   setView(
-    '<h2 class="mt0">' + esc(S('newOrderTitle')) + '</h2>' + closedWarn + wizardStepsHtml() +
+    '<h2 class="mt0">' + esc(S('newOrderTitle')) + '</h2>' + wizardStepsHtml() +
     '<div class="card"><div class="field"><label>' + esc(S('directionLabel')) + '</label>' +
     '<div class="filter-bar">' +
     '<button class="chip' + (wizard.direction === 'THB_TO_MMK' ? ' active' : '') + '" id="wzDirThb" type="button">' + esc(S('directionThbToMmk')) + '</button>' +
@@ -1533,6 +1539,13 @@ function renderWizardStep3(token) {
     try {
       // Re-read settings so the locked rate is the freshest one.
       await loadSettings();
+      // The shop may have closed mid-wizard: refuse before uploading.
+      if (!state.settings.shop.is_open) {
+        errEl.textContent = S('shopClosedBlock');
+        wizard.submitting = false;
+        $('#wzSubmit').disabled = false;
+        return;
+      }
       var freshQuote = calcQuote(wizard.direction, wizard.sendAmount, state.settings);
       var slipPath = await store.uploadSlip(wizard.slipFile, state.user.id);
       var order = await store.createOrder({
